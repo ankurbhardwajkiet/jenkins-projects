@@ -1,32 +1,60 @@
 pipeline {
     agent any
 
+    environment {
+        // Replace with your DockerHub repo and AWS details
+        DOCKER_IMAGE = "yourdockerhubusername/jenkins-project"
+        AWS_EC2_IP = "your.aws.ec2.ip"
+        SSH_CREDENTIALS_ID = "your-jenkins-ssh-id" // Set up this ID in Jenkins
+    }
+
     stages {
         stage('Clone Repository') {
             steps {
-                git url: 'https://github.com/ankurbhardwajkiet/jenkins-projects.git', branch: 'main'
+                git branch: 'main', url: 'https://github.com/ankurbhardwajkiet/jenkins-projects.git'
+            }
+        }
+        
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    sh 'docker build -t ${DOCKER_IMAGE}:latest .'
+                }
             }
         }
 
-        stage('Build') {
+        stage('Push Docker Image to DockerHub') {
             steps {
-                echo 'Building the project...'
-                // Add build commands here, e.g., Maven, Gradle, npm
+                script {
+                    withDockerRegistry([credentialsId: 'dockerhub-credentials-id', url: '']) {
+                        sh 'docker push ${DOCKER_IMAGE}:latest'
+                    }
+                }
             }
         }
 
-        stage('Test') {
+        stage('Deploy to AWS EC2') {
             steps {
-                echo 'Running tests...'
-                // Add testing commands here
+                sshagent(['${SSH_CREDENTIALS_ID}']) {
+                    sh """
+                    ssh -o StrictHostKeyChecking=no ec2-user@${AWS_EC2_IP} << EOF
+                    docker pull ${DOCKER_IMAGE}:latest
+                    docker stop jenkins-project || true
+                    docker rm jenkins-project || true
+                    docker run -d --name jenkins-project -p 80:80 ${DOCKER_IMAGE}:latest
+                    EOF
+                    """
+                }
             }
         }
+    }
 
-        stage('Deploy') {
-            steps {
-                echo 'Deploying the project...'
-                // Add deployment commands here
-            }
+    post {
+        success {
+            echo 'Deployment Successful!'
+        }
+        failure {
+            echo 'Deployment Failed!'
         }
     }
 }
